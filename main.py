@@ -1,7 +1,6 @@
 import math
 import os
 import pygame
-import random
 import random as rad
 import sys
 import time
@@ -68,6 +67,7 @@ class StaticObject(Entity):
 
 
 pygame.init()
+key_up = True
 scale = (800, 600)
 window = pygame.display.set_mode(scale)
 clock = pygame.time.Clock()
@@ -135,6 +135,8 @@ class CameraGroup(pygame.sprite.Group):
         self.offset.y = target.rect.centery - self.half_h
 
     def camera_draw(self, player):
+        global key_up
+
         self.mouse_control(player)
         for tile in self.floor_tile_group:
             offset_pos = tile.rect.topleft - self.offset
@@ -142,23 +144,32 @@ class CameraGroup(pygame.sprite.Group):
 
         sorted_sprites = sorted(self.sprites(), key=lambda x: x.rect.topleft[1])
         for sprite in sorted_sprites:
-            if sprite.dead is True and type(sprite) != Gun:
+            if sprite.dead is True and type(sprite) != Gun and type(sprite) != Shield:
                 self.remove(sprite)
                 if sprite in self.gun_group:
                     self.gun_group.remove(sprite)
                 if sprite in self.colliding_objects:
                     self.colliding_objects.remove(sprite)
+                if sprite in ALL_bullets:
+                    ALL_bullets.remove(sprite)
                 continue
             if sprite in self.colliding_objects:
                 for bullet in ALL_bullets:
                     if sprite.rect.colliderect(bullet.rect):
-                        if bullet.team != sprite.team and sprite.team != -1:
-                            if sprite.team != 0:
+                        if bullet.team != sprite.team and sprite.team != -1 and bullet.team != 0:
+                            if sprite.team != 0 and not (sprite == player and type(gun) == Shield):
                                 sprite.get_damage(bullet.damage)
-                            ALL_bullets.remove(bullet)
+                            else:
+                                if type(sprite) == Player:
+                                    if rad.randint(0, 4) == 1:
+                                        sprite.get_damage(bullet.damage)
+                                create_reflection_bullets(sprite.rect.centerx, sprite.rect.centery, bullet)
                             bullet.dead = True
+                            ALL_bullets.remove(bullet)
+
                 if type(sprite) == Door:
                     if sprite.rect.colliderect(player.rect):
+
                         self.colliding_objects.clear()
                         self.floor_tile_group.clear()
                         self.gun_group.clear()
@@ -189,6 +200,7 @@ class CameraGroup(pygame.sprite.Group):
 
                             gun.who_is_holding = player1
                         else:
+                            key_up = False
                             self.safe = False
                             player1 = generate_level(generate_random_lvl_layout())
                             gun.who_is_holding = player1
@@ -197,6 +209,8 @@ class CameraGroup(pygame.sprite.Group):
         for gun1 in self.gun_group:
             offset_pos = gun1.rect.topleft - self.offset
             self.surface1.blit(gun1.image, offset_pos)
+        offset_pos = EPICSHIELD.rect.topleft - self.offset
+        self.surface1.blit(EPICSHIELD.image, offset_pos)
 
 
 class Enemy(Entity):
@@ -209,7 +223,9 @@ class Enemy(Entity):
         self.speed = 2
 
     def update(self):
-        global player, movement_delay
+        global player
+        global movement_delay
+
         if time.time() - self.last_moved > movement_delay:
             pass
         move = [0, 0]
@@ -325,6 +341,7 @@ class Bullet(pygame.sprite.Sprite):
         self.image, nothing = rot_center(self.base_image, self.base_rect, angle)
 
     def update(self):
+        self.check()
         self.pos = (self.pos[0] + self.dir[0] * self.speed,
                     self.pos[1] + self.dir[1] * self.speed)
         self.rect = self.base_image.get_rect(center=(self.pos[0], self.pos[1]))
@@ -337,18 +354,30 @@ class Bullet(pygame.sprite.Sprite):
             self.dead = True
 
 
+
 class Player(Entity):
-    def __init__(self, x_indent=0, y_indent=0, x=250, y=250, speed=3):
+    def __init__(self, x_indent=0, y_indent=0, x=250, y=250, speed=8):
         global camera, health
         self.team = 1
-        image = 'pixilart-drawing.png'
+        self.sprite_id = 0
+        self.images = ['player_still.png', 'player_down.png', 'player_up.png']
+        image = self.images[0]
         self.hp = health
+        self.last_sprite_update = time.time()
         super().__init__(camera, x, y, x_indent, y_indent, health, speed, image)
 
     def move(self):
         global movement_delay, player
         self.analyze_input()
+
         if time.time() - self.last_moved > movement_delay:
+            if (self.direction.x != 0 or self.direction.y != 0) and time.time() - self.last_sprite_update > 0.3:
+                self.image = load_image(self.images[self.sprite_id])
+                self.last_sprite_update = time.time()
+                self.sprite_id = (self.sprite_id + 1) % 3
+            elif time.time() - self.last_moved > 0.4:
+                self.image = load_image(self.images[0])
+                self.sprite_id = 0
             self.hitbox.center += self.direction * self.speed
             for object1 in camera.colliding_objects:
                 if object1.hitbox.colliderect(self.hitbox):
@@ -362,15 +391,19 @@ class Player(Entity):
                         continue
                     if type(object1) == Label:
                         continue
+                    if type(object1) == Shield:
+                        continue
                     self.hitbox.center -= self.direction * self.speed
                     return
             self.rect.center += self.direction * self.speed
+            self.last_moved = time.time()
 
     def get_damage(self, amount):
         global health
         health -= amount
 
     def analyze_input(self):
+        global gun
         key = pygame.key.get_pressed()
         if key[pygame.K_w]:
             self.direction.y = -1
@@ -378,14 +411,14 @@ class Player(Entity):
             self.direction.y = 1
         else:
             self.direction.y = 0
-
         if key[pygame.K_a]:
             self.direction.x = -1
         elif key[pygame.K_d]:
             self.direction.x = 1
         else:
             self.direction.x = 0
-        global gun
+        if type(gun) == Gun:
+            gun.if_shooting()
         if key[pygame.K_1]:
             gun.who_is_holding = uselul
             gun = weapons[0]
@@ -401,6 +434,10 @@ class Player(Entity):
             gun = weapons[2]
             gun.who_is_holding = self
             gun.team = self.team
+        if key[pygame.K_4]:
+            gun.who_is_holding = uselul
+            gun = EPICSHIELD
+            EPICSHIELD.who_is_holding = self
 
     def health_and_ammo(self):
         global health
@@ -432,6 +469,7 @@ class Gun(pygame.sprite.Sprite):
         super().__init__(camera)
         self.ammo = ammo
         x, y = who_is_holding.rect.center
+
         x -= x_indent
         y -= 1
         camera.gun_group.append(self)
@@ -477,11 +515,11 @@ class Gun(pygame.sprite.Sprite):
                       self.dir1[1] + rad.uniform(-self.drop, self.drop))
         bullet = Bullet(x, y, bullet_dir, self.angle, self.damage, self.speed, self.surf, self.team, self.range1,
                         self.bullet_image, self.drop)
-        print(bullet.rect.center, bullet.team)
         ALL_bullets.append(bullet)
 
     def update(self):
         global camera
+        self.who_is_holding.speed = 7
         if self not in camera.gun_group:
             camera.gun_group.append(self)
         self.dead = self.who_is_holding.dead
@@ -588,21 +626,6 @@ class EnemyGun(Gun):
         ALL_bullets.append(bullet)
 
 
-class Particle(pygame.sprite.Sprite):
-    def __init__(self, x, y, image='boom-boom.png', lifetime=20):
-        global camera
-        super().__init__(camera)
-        self.base_image = pygame.image.load(image).convert_alpha()
-        self.base_rect = self.base_image.get_rect(center=(x, y))
-        self.lifetime = lifetime
-        self.dead = False
-
-    def update(self):
-        self.lifetime -= 1
-        if self.lifetime < 0:
-            self.dead = True
-
-
 class Label(pygame.sprite.Sprite):
     def __init__(self, x, y, shop_id=-1):
         super().__init__(camera)
@@ -626,7 +649,6 @@ class Label(pygame.sprite.Sprite):
         self.display1 = self.hitbox.colliderect(player1.hitbox)
 
     def display_text(self):
-        print(self.rect, player1.rect)
         global window, scrap
         text = ''
         e = pygame.key.get_pressed()
@@ -636,7 +658,7 @@ class Label(pygame.sprite.Sprite):
                     '                      10 Scrap           ']
             if e:
                 if self.shop_id not in more_useful and scrap >= 10:
-                    shotgun = Gun(uselul, 0.55, 15, 6, 5, 0.15, camera, 4, 'shotgun.png', 'shotgun_bullet.png',
+                    shotgun = Gun(uselul, 0.55, 15, 6, 5, 0.15, camera, 400, 'shotgun.png', 'shotgun_bullet.png',
                                   per_burst=5, reloadtime=1)
                     weapons.append(shotgun)
                     more_useful.append(self.shop_id)
@@ -646,7 +668,7 @@ class Label(pygame.sprite.Sprite):
                     '                      10 Scrap           ']
             if e:
                 if self.shop_id not in more_useful and scrap >= 10:
-                    ak = Gun(uselul, 0.08, 1, 25, 6, 0.08, camera, 500, 'pixel_ak_47.png', 'shotgun_bullet.png',
+                    ak = Gun(uselul, 0.08, 1, 25, 5, 0.08, camera, 400, 'pixel_ak_47.png', 'shotgun_bullet.png',
                              reloadtime=1, per_burst=20)
                     weapons.append(ak)
                     more_useful.append(self.shop_id)
@@ -687,12 +709,53 @@ class Door(pygame.sprite.Sprite):
         self.dead = False
 
 
+class Shield(pygame.sprite.Sprite):
+    def __init__(self, who_is_holding):
+        super().__init__(camera)
+        camera.colliding_objects.append(self)
+        self.image = load_image('shield.png')
+        self.base_image = load_image('shield.png')
+        self.rect = self.image.get_rect(center=who_is_holding.rect.center)
+        self.base_rect = self.base_image.get_rect(center=who_is_holding.rect.center)
+        self.who_is_holding = who_is_holding
+        self.hitbox = self.rect
+        self.ammo = 'N/A'
+        self.team = 0
+        self.dead = False
+
+    def update(self):
+        global camera
+        if type(self.who_is_holding) == Player:
+            self.who_is_holding.speed = 1
+        self.dead = self.who_is_holding.dead
+        camerax, cameray = camera.offset[0], camera.offset[1]
+        x, y = self.who_is_holding.rect.center
+        mx, my = pygame.mouse.get_pos()
+        mx, my = mx + camerax, my + cameray
+        self.dir1 = (mx - x, my - y)
+        length = math.hypot(*self.dir1)
+        if length == 0.0:
+            self.dir1 = 0, -1
+        else:
+            self.dir1 = (self.dir1[0] / length, self.dir1[1] / length)
+        self.angle = math.degrees(math.atan2(-self.dir1[1], self.dir1[0]))
+        if self.angle < -90.0 or self.angle > 90.0:
+            self.reversed = True
+        else:
+            self.reversed = False
+        self.image, self.rect = rot_center(self.base_image, self.base_rect, self.angle, self.reversed)
+        self.rect = self.image.get_rect(center=(self.who_is_holding.rect.centerx, self.who_is_holding.rect.centery))
+        self.hitbox = self.rect
+
+
 class PickableObject(pygame.sprite.Sprite):
     def __init__(self, type1='Medkit', x=0, y=0, power=30):
         super().__init__(camera)
         objects = {'Medkit': load_image('medkit.png'),
                    'Ammo_pack': load_image('ammo-pack.png'),
-                   'Scrap': load_image('scrap.png')}
+                   'Scrap': load_image('scrap.png'),
+                   'key': load_image('key.png')
+                   }
         camera.colliding_objects.append(self)
         self.power = power
         self.x = x
@@ -705,13 +768,15 @@ class PickableObject(pygame.sprite.Sprite):
         self.type = type1
 
     def activate(self):
-        global health, scrap
+        global health, scrap, key_up
         if self.type == 'Medkit':
             health += self.power
-        elif self.type == 'Ammo_pack':
+        elif self.type == 'Ammo_pack' and type(gun) != Shield:
             gun.ammo += self.power
-        else:
+        elif self.type == 'scrap':
             scrap += 1
+        else:
+            key_up = True
 
 
 def rot_center(image, rect, angle, flip=False):
@@ -774,16 +839,19 @@ def load_level(filename):
 def generate_random_lvl_layout():
     c = []
     k = []
-    len_x = random.randint(7, 15)
-    len_y = random.randint(7, 15)
+    len_x = rad.randint(7, 15)
+    len_y = rad.randint(7, 15)
     for i in range(len_x):
         k.append('o')
         for z in range(len_y):
-            if random.randint(0, 20) == 1:
+            if z == len_y // 2 + len_y % 2 - 1 and (i == 0 or i == 1):
+                k.append('.')
+                continue
+            if rad.randint(0, 20) == 1:
                 k.append('#')
-            elif random.randint(0, 10) == 1:
+            elif rad.randint(0, 10) == 1:
                 k.append('*')
-            elif random.randint(0, 12) == 1 and i >= 6:
+            elif rad.randint(0, 12) == 1 and i >= 6:
                 k.append('&')
             else:
                 k.append('.')
@@ -792,7 +860,6 @@ def generate_random_lvl_layout():
         k.clear()
     c.insert(0, ['o'] * (len_y // 2 + len_y % 2) + ['F'] + ['o'] * (len_y // 2 + 1))
     c.append(['o'] * (len_y // 2 + len_y % 2) + ['N'] + ['o'] * (len_y // 2 + 1))
-
     return c
 
 
@@ -803,6 +870,21 @@ def load_image(name):
         sys.exit()
     image = pygame.image.load(fullname).convert_alpha()
     return image
+
+
+def create_reflection_bullets(x, y, bullet_class):
+    dir1 = (bullet_class.rect.centerx - x, bullet_class.rect.centery - y)
+    length = math.hypot(*dir1)
+    print('exist')
+    if length == 0.0:
+        dir1 = 0, -1
+    else:
+        dir1 = (dir1[0] / length, dir1[1] / length)
+    angle = math.degrees(math.atan2(-dir1[1], dir1[0]))
+    for i in range(rad.randint(3, 6)):
+        k = Bullet(bullet_class.rect.centerx, bullet_class.rect.centery, dir1, angle, 0, 9, camera,
+                   team=0, bullet_image='particle.png', range1=50)
+        ALL_bullets.append(k)
 
 
 def generate_level(level):
@@ -860,13 +942,23 @@ def generate_level(level):
             elif level[y][x] == '*':
                 Tile('empty', x, y)
                 StaticObject(camera, x=x * 50, y=y * 50, hp=200)
+            elif level[y][x] == ',':
+                print('snow')
+                Tile('snow', x, y)
             elif level[y][x] == '&':
                 Tile('empty', x, y)
-                assault_rifle = EnemyGun(uselul, 0.07, 2, 3, 4, 0, camera, 4,
-                                         'assault_rifle.png', 'shotgun_bullet.png', per_burst=3, reloadtime=1)
-                k = Enemy(x * 50, y * 50, assault_rifle)
-                assault_rifle.who_is_holding = k
-                assault_rifle.team = k.team
+                if rad.randint(0, 2) == 0:
+                    rifle = EnemyGun(uselul, 0.07, 1, 3, 3, 0.12, camera, 400,
+                                     'assault_rifle.png', 'shotgun_bullet.png', per_burst=3, reloadtime=1)
+                elif rad.randint(0, 2) == 1:
+                    rifle = EnemyGun(uselul, 0.12, 1, 3, 3, 0.23, camera, 350, 'pixel_ak_47.png', 'shotgun_bullet.png',
+                                     reloadtime=3, per_burst=30)
+                else:
+                    rifle = EnemyGun(uselul, 0.5, 5, 1, 3, 0.3, camera, 350,
+                                     'shotgun.png', 'shotgun_bullet.png', per_burst=1, reloadtime=0)
+                k = Enemy(x * 50, y * 50, rifle)
+                rifle.who_is_holding = k
+                rifle.team = k.team
             elif level[y][x] == 'N':
                 Door(x * 50, y * 50)
             elif level[y][x] == 'L':
@@ -880,13 +972,12 @@ def generate_level(level):
                     labels.append(Label(x * 50, y * 50, shop_id=id1))
             elif level[y][x] == '#':
                 Tile('empty', x, y)
-                if random.randint(0, 10) == 1:
+                if rad.randint(0, 10) == 1:
                     PickableObject('Medkit', x * 50, y * 50)
-                elif random.randint(0, 2) == 1:
+                elif rad.randint(0, 2) == 1:
                     PickableObject('Ammo_pack', x * 50, y * 50)
                 else:
                     PickableObject('Scrap', x * 50, y * 50)
-
     if new_player is None:
         new_player = Player
         return new_player(x=((len(level[0]) // 2 + len(level[0]) % 2 - 1) * 50), y=60)
@@ -894,7 +985,7 @@ def generate_level(level):
 
 
 def game_over():
-    global window, scale, days
+    global window, scales
     intro_text = ['',
                   '',
                   '                                                                          Game:   ',
@@ -935,19 +1026,16 @@ def game_over():
 
 
 run = True
+
 more_useful = []
 bullets = []
-shot_delay = 0.5
 camera = CameraGroup()
 gun_image = 'Flamethrower.png'
 bullet_image = 'Flamethrower_particle.png'
 images = ['Barrel.jpg', 'Barrels.png']
 
 tiles = pygame.sprite.Group()
-bullets_per_shot = 7
-damage = 1000
-speed = 7
-scrap = 2000
+scrap = 0
 health = 100
 labels = []
 
@@ -955,36 +1043,29 @@ tile_images = {
     'void': load_image('ground_tile.png'),
     'empty': load_image('ground_tile.png'),
     'snow_var3': load_image('Barrel.jpg'),
-    'wall': load_image('wall_tile.png')
-    }
-
-player_image = load_image('pixilart-drawing.png')
+    'wall': load_image('wall_tile.png'),
+    'snow': load_image('snow.png')
+}
 
 tile_width = tile_height = 50
 uselul = StaticObject(y=-10000, x=-10000, camera=camera)
 ALL_bullets = []
 player1 = generate_level(load_level('safe_base.txt'))
-assault_rifle = Gun(uselul, 0.05, 1, 25, 7, 0.03, camera, 4, 'assault_rifle.png', 'shotgun_bullet.png',
+assault_rifle = Gun(uselul, 0.05, 1, 25, 7, 0.03, camera, 400, 'assault_rifle.png', 'shotgun_bullet.png',
                     per_burst=3, reloadtime=0.5)
 
 weapons = [assault_rifle]
 gun = weapons[0]
 '''drop - acceptable numbers <= 0.3, anything more is questionable, more than 1 is straight up wrong'''
-drop = 0.1
 gun.who_is_holding = player1
 gun.team = player1.team
-range1 = 1000
 start_screen()
-
-
 safe = True
-
+EPICSHIELD = Shield(uselul)
 
 while run:
     clock.tick(100)
     player1.move()
-    gun.if_shooting()
-    gun.update()
 
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
@@ -993,7 +1074,6 @@ while run:
             if (event.y == -1 and camera.zoom_scale > 1) or (event.y == 1 and camera.zoom_scale <= 1.1):
                 camera.zoom_scale += event.y * 0.1
     if health <= 0 or player1.dead:
-        print('yes')
         game_over()
     window.fill(0)
     camera.update()
