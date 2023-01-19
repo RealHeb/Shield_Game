@@ -875,7 +875,6 @@ def load_image(name):
 def create_reflection_bullets(x, y, bullet_class):
     dir1 = (bullet_class.rect.centerx - x, bullet_class.rect.centery - y)
     length = math.hypot(*dir1)
-    print('exist')
     if length == 0.0:
         dir1 = 0, -1
     else:
