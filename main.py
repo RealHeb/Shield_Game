@@ -773,7 +773,7 @@ class PickableObject(pygame.sprite.Sprite):
             health += self.power
         elif self.type == 'Ammo_pack' and type(gun) != Shield:
             gun.ammo += self.power
-        elif self.type == 'scrap':
+        elif self.type == 'Scrap':
             scrap += 1
         else:
             key_up = True
